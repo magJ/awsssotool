@@ -1,4 +1,4 @@
-module aws-sso-util
+module awsssotool
 
 go 1.15
 

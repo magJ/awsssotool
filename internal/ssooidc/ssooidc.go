@@ -1,7 +1,7 @@
 package ssooidc
 
 import (
-	jsonutil "aws-sso-util/internal/json"
+	jsonutil "awsssotool/internal/json"
 	"context"
 	"crypto/sha1"
 	"encoding/json"

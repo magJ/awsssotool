@@ -1,7 +1,7 @@
 package awsconsole
 
 import (
-	jsonutil "aws-sso-util/internal/json"
+	jsonutil "awsssotool/internal/json"
 	"encoding/json"
 	"io/ioutil"
 	"net/http"

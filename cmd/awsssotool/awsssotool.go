@@ -1,10 +1,10 @@
 package main
 
 import (
-	"aws-sso-util/internal/awsconsole"
-	"aws-sso-util/internal/config"
-	"aws-sso-util/internal/sso"
-	"aws-sso-util/internal/ssooidc"
+	"awsssotool/internal/awsconsole"
+	"awsssotool/internal/config"
+	"awsssotool/internal/sso"
+	"awsssotool/internal/ssooidc"
 	"context"
 	"errors"
 	"github.com/AlecAivazis/survey/v2"
@@ -28,8 +28,9 @@ var cfg config.Context
 
 func main() {
 	var app = &cli.App{
-		Name:        "sso-tool",
-		Description: "The missing AWS SSO cli tool",
+		Name:        "awsssotool",
+		Usage:       "The missing AWS SSO cli tool",
+		Description: "Various utilities to make using AWS SSO easier",
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
 				Name:    "verbose",
@@ -57,7 +58,7 @@ func main() {
 			},
 			{
 				Name:  "login",
-				Usage: "Acquires AWS SSO device authorisation, opens a browser to SSO CLI auth page if necessary.",
+				Usage: "Acquires and caches AWS SSO device authorisation, opens a browser to SSO CLI auth page if necessary.",
 				Description: "Checks for existing valid authorisation.\n" +
 					"Performs client registration, and device authorisation via the AWS SSO website.\n" +
 					"You will need to login to the website, possibly enter a code, and click the CLI grant confirmation.\n" +
@@ -90,7 +91,7 @@ func main() {
 			},
 			{
 				Name:  "console",
-				Usage: "Login to the AWS web console",
+				Usage: "Opens a browser session to the AWS console, using a selected account/role",
 				Flags: []cli.Flag{
 					&cli.StringFlag{
 						Name: config.StartUrl.Name(),
