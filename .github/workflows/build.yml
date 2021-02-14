@@ -14,11 +14,11 @@ jobs:
       - name: build
         run: |
           echo "GO111MODULE=on" >> $GITHUB_ENV
-          GOOS=windows GOARCH=amd64 go build cmd/awsssotool/ -o bin/awsssotool-windows-amd64.exe
-          GOOS=linux   GOARCH=amd64 go build cmd/awsssotool/ -o bin/awsssotool-linux-amd64
-          GOOS=darwin  GOARCH=amd64 go build cmd/awsssotool/ -o bin/awsssotool-darwin-amd64
+          GOOS=windows GOARCH=amd64 go build -o dist/awsssotool-windows-amd64.exe cmd/awsssotool/awsssotool.go
+          GOOS=linux   GOARCH=amd64 go build -o dist/awsssotool-linux-amd64 cmd/awsssotool/awsssotool.go
+          GOOS=darwin  GOARCH=amd64 go build -o dist/awsssotool-darwin-amd64 cmd/awsssotool/awsssotool.go
       - name: upload artifacts
         uses: actions/upload-artifact@master
         with:
           name: binaries
-          path: bin/
+          path: dist/
