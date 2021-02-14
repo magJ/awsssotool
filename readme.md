@@ -1,5 +1,5 @@
 # aws sso tool
-The missing AWS SSO cli tool
+The missing AWS SSO CLI tool
 
 ### Functionality
 - AWS web console
