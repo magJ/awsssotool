@@ -25,6 +25,31 @@ import (
 
 var awsLogging aws.ClientLogMode
 var cfg config.Context
+var knownAwsRegions = []string{
+	"us-east-2",
+	"us-east-1",
+	"us-west-1",
+	"us-west-2",
+	"af-south-1",
+	"ap-east-1",
+	"ap-south-1",
+	"ap-northeast-3",
+	"ap-northeast-2",
+	"ap-southeast-1",
+	"ap-southeast-2",
+	"ap-northeast-1",
+	"ca-central-1",
+	"cn-north-1",
+	"cn-northwest-1",
+	"eu-central-1",
+	"eu-west-1",
+	"eu-west-2",
+	"eu-south-1",
+	"eu-west-3",
+	"eu-north-1",
+	"me-south-1",
+	"sa-east-1",
+}
 
 func main() {
 	var app = &cli.App{
@@ -69,6 +94,10 @@ func main() {
 						Usage: "Just print AWS SSO url, do not open in browser.",
 					},
 					&cli.StringFlag{
+						Name:  config.SsoRegion.Name(),
+						Usage: "Region to use with SSO apis",
+					},
+					&cli.StringFlag{
 						Name: config.StartUrl.Name(),
 						Usage: "URL to AWS SSO start page.\n" +
 							"If not specified, we will attempt to discover it from AWS config.",
@@ -88,6 +117,17 @@ func main() {
 					"This command saves role credentials to $HOME/.aws/credentials, in standard format" +
 					"(aws_access_key_id, aws_access_access_key, aws_session_token)",
 				Action: syncCredentialsAction,
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name: config.StartUrl.Name(),
+						Usage: "URL to AWS SSO start page.\n" +
+							"If not specified, we will attempt to discover it from AWS config.",
+					},
+					&cli.StringFlag{
+						Name:  config.SsoRegion.Name(),
+						Usage: "Region to use with SSO apis",
+					},
+				},
 			},
 			{
 				Name:  "console",
@@ -97,6 +137,10 @@ func main() {
 						Name: config.StartUrl.Name(),
 						Usage: "URL to AWS SSO start page.\n" +
 							"If not specified, we will attempt to discover it from AWS config.",
+					},
+					&cli.StringFlag{
+						Name:  config.SsoRegion.Name(),
+						Usage: "Region to use with SSO apis",
 					},
 					&cli.StringFlag{
 						Name:        config.Destination.Name(),
@@ -125,7 +169,60 @@ func main() {
 }
 
 func configureAction(c *cli.Context) error {
-	return errors.New("command not implemented")
+	candidates := ssoStartUrlCandidates()
+	defaultStartUrl := ""
+	if len(candidates) > 0 {
+		defaultStartUrl = candidates[0]
+	}
+
+	var startUrl string
+	err := survey.AskOne(&survey.Input{
+		Message: "SSO Start URL",
+		Default: defaultStartUrl,
+		Help:    "The URL to your AWS SSO start page. eg https://example.awsapps.com/start",
+	}, &startUrl)
+	if err != nil {
+		return err
+	}
+	var ssoRegion string
+	err = survey.AskOne(&survey.Input{
+		Message: "SSO Region",
+		Help:    "The region to use when communicating with the AWS SSO API",
+		Suggest: startsWithCompleter(knownAwsRegions),
+	}, &ssoRegion)
+	if err != nil {
+		return err
+	}
+
+	var useBrowserContainer bool
+	err = survey.AskOne(&survey.Confirm{
+		Message: "Use firefox container support?",
+		Default: false,
+		Help:    "Requires the firefox containers plugin, and the `open-url-in-container` plugin (https://github.com/honsiorovskyi/open-url-in-container)",
+	}, &useBrowserContainer)
+
+	err = config.SaveConfig(config.ToolPersistentConfig{
+		StartUrl:            &startUrl,
+		SsoRegion:           &ssoRegion,
+		UseContainerSupport: &useBrowserContainer,
+	})
+	if err != nil {
+		return err
+	}
+	log.Info("Config saved")
+	return nil
+}
+
+func startsWithCompleter(completions []string) func(toComplete string) []string {
+	return func(toComplete string) []string {
+		var suggestions []string
+		for _, completion := range completions {
+			if strings.HasPrefix(completion, toComplete) {
+				suggestions = append(suggestions, completion)
+			}
+		}
+		return suggestions
+	}
 }
 
 func beforeAction(c *cli.Context) error {
@@ -170,8 +267,8 @@ func syncCredentialsAction(c *cli.Context) error {
 		return err
 	}
 
+	var profilesLoaded []string
 	var accountsToLoad = accountsToLoad(listedAccounts)
-
 	for _, accountId := range accountsToLoad {
 		roles, err := ssoClient.ListAccountRoles(accountId)
 		if err != nil {
@@ -179,13 +276,19 @@ func syncCredentialsAction(c *cli.Context) error {
 		}
 		rolesToLoad := rolesToLoad(accountId, roles)
 		for _, role := range rolesToLoad {
-			credentials, err := ssoClient.GetRoleCredentials(accountId, role)
+			credentials, err := ssoClient.GetRoleCredentials(accountId, role.roleName)
 			if err != nil {
 				return err
 			}
-			saveProfileCredentials(accountId, role, *credentials)
+			profileName, err := saveProfileCredentials(accountId, role, *credentials)
+			if err != nil {
+				log.Error("Error saving credentials account: " + accountId + ", role: " + role.roleName)
+				return err
+			}
+			profilesLoaded = append(profilesLoaded, profileName)
 		}
 	}
+	log.Info("Credentials synced for profiles: " + strings.Join(profilesLoaded, ", "))
 	return nil
 }
 
@@ -229,7 +332,7 @@ func consoleLoginAction(c *cli.Context) error {
 		}
 		rolesToLoad := rolesToLoad(accountId, roles)
 		for _, role := range rolesToLoad {
-			credentials, err := ssoClient.GetRoleCredentials(accountId, role)
+			credentials, err := ssoClient.GetRoleCredentials(accountId, role.roleName)
 			if err != nil {
 				return err
 			}
@@ -240,7 +343,7 @@ func consoleLoginAction(c *cli.Context) error {
 
 			accountUrlDetails = append(accountUrlDetails, accountUrlDetail{
 				consoleUrl:  consoleUrl,
-				roleName:    role,
+				roleName:    role.roleName,
 				accountInfo: accountMap[accountId],
 			})
 		}
@@ -300,38 +403,154 @@ func containerUrl(consoleUrl string, accountEmail string, roleName string) strin
 func consoleSignInUrl(roleCredentials types.RoleCredentials, startUrl string, destination string) (string, error) {
 	return awsconsole.GetConsoleSignInUrl(awsconsole.AwsCredentials{
 		AccessKeyId:     *roleCredentials.AccessKeyId,
-		Expiration:      time.Unix(roleCredentials.Expiration, 0),
+		Expiration:      time.Unix(0, roleCredentials.Expiration*int64(time.Millisecond)).UTC(),
 		SecretAccessKey: *roleCredentials.SecretAccessKey,
 		SessionToken:    *roleCredentials.SessionToken,
 	}, startUrl, destination)
 }
 
-func saveProfileCredentials(accountId string, roleName string, credentials types.RoleCredentials) {
+func saveProfileCredentials(accountId string, roleDetail roleDetail, credentials types.RoleCredentials) (string, error) {
 
+	iniPath := awsconfig.DefaultSharedCredentialsFilename()
+	err := touch(iniPath)
+	if err != nil {
+		return "", err
+	}
+	iniData, err := ini.Load(iniPath)
+	if err != nil {
+		return "", err
+	}
+	var profileName string
+	if roleDetail.profileName != "" {
+		profileName = roleDetail.profileName
+	} else {
+		profileName = roleDetail.roleName + "-" + accountId
+	}
+	section := iniData.Section(profileName)
+	section, err = iniData.NewSection(profileName)
+	if err != nil {
+		return "", err
+	}
+	_, err = section.NewKey("region", cfg.AwsConfig().Region)
+	if err != nil {
+		return "", err
+	}
+	err = config.UpsertKey(section, "aws_access_key_id", *credentials.AccessKeyId)
+	if err != nil {
+		return "", err
+	}
+	err = config.UpsertKey(section, "aws_secret_access_key", *credentials.SecretAccessKey)
+	if err != nil {
+		return "", err
+	}
+	err = config.UpsertKey(section, "aws_session_token", *credentials.SessionToken)
+	if err != nil {
+		return "", err
+	}
+	err = config.UpsertKey(section, "aws_session_expiration", time.Unix(0, credentials.Expiration*int64(time.Millisecond)).UTC().Format(time.RFC3339))
+	if err != nil {
+		return "", err
+	}
+	err = iniData.SaveTo(iniPath)
+	if err != nil {
+		return "", err
+	}
+
+	return profileName, nil
 }
 
-func rolesToLoad(accountId string, roles []types.RoleInfo) []string {
-	// TODO look at profile, and role config
+func touch(filePath string) error {
+	_, err := os.Stat(filePath)
+	if os.IsNotExist(err) {
+		file, err := os.Create(filePath)
+		if err != nil {
+			return err
+		}
+		err = file.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func rolesToLoad(accountId string, roles []types.RoleInfo) []roleDetail {
 	if len(roles) == 0 {
 		log.Warn("No roles available for account: " + accountId)
-		return []string{}
+		return []roleDetail{}
 	}
 
 	var roleNames []string
 	for _, role := range roles {
 		roleNames = append(roleNames, *role.RoleName)
 	}
-
-	var selected []string
-	err := survey.AskOne(&survey.MultiSelect{
-		Message: "Select role(s) for " + accountId,
-		Options: roleNames,
-	}, &selected)
-
-	if err != nil {
-		log.Error(err)
+	listedRoleNameSet := stringset.New(roleNames)
+	desiredRoles := desiredRolesToLoad(accountId)
+	if len(desiredRoles) > 0 {
+		var matchingRoles []roleDetail
+		for _, role := range desiredRoles {
+			if listedRoleNameSet.Contains(role.roleName) {
+				matchingRoles = append(matchingRoles, role)
+			} else {
+				log.Warn("Desired role not available in SSO role listing, Role name: " + role.roleName)
+			}
+		}
+		var matchingRoleNames []string
+		for _, role := range matchingRoles {
+			matchingRoleNames = append(matchingRoleNames, role.roleName)
+		}
+		log.Info("Loading desired roles: " + strings.Join(matchingRoleNames, ","))
+		return matchingRoles
 	}
-	return selected
+
+	if cfg.InteractiveAllowed() {
+		var selected []string
+		err := survey.AskOne(&survey.MultiSelect{
+			Message: "Select role(s) for " + accountId,
+			Options: roleNames,
+		}, &selected)
+
+		if err != nil {
+			log.Error(err)
+		}
+		var selectedDetails []roleDetail
+		for _, selection := range selected {
+			selectedDetails = append(selectedDetails, roleDetail{
+				roleName:    selection,
+				profileName: "",
+			})
+		}
+		return selectedDetails
+	}
+	return []roleDetail{}
+}
+
+type roleDetail struct {
+	roleName    string
+	profileName string
+}
+
+func desiredRolesToLoad(accountId string) []roleDetail {
+	var desiredRoles []roleDetail
+	configRoles := cfg.GetValue(config.Roles).([]string)
+	if configRoles != nil {
+		for _, cr := range configRoles {
+			desiredRoles = append(desiredRoles, roleDetail{
+				roleName:    cr,
+				profileName: "",
+			})
+		}
+	}
+	profiles := getNominatedSsoProfiles()
+	for _, profile := range profiles {
+		if profile.SSOAccountID == accountId && profile.SSORoleName != "" {
+			desiredRoles = append(desiredRoles, roleDetail{
+				roleName:    profile.SSORoleName,
+				profileName: profile.Profile,
+			})
+		}
+	}
+	return desiredRoles
 }
 
 func accountsToLoad(listedAccounts []types.AccountInfo) []string {
@@ -399,6 +618,27 @@ func desiredAccountsToLoad() []string {
 	if configAccounts != nil {
 		accountIds = append(accountIds, configAccounts...)
 	}
+	profiles := getNominatedSsoProfiles()
+	for _, profile := range profiles {
+		accountIds = append(accountIds, profile.SSOAccountID)
+	}
+	return unique(accountIds)
+}
+
+func unique(stringSlice []string) []string {
+	keys := make(map[string]bool)
+	var list []string
+	for _, entry := range stringSlice {
+		if _, value := keys[entry]; !value {
+			keys[entry] = true
+			list = append(list, entry)
+		}
+	}
+	return list
+}
+
+func getNominatedSsoProfiles() []awsconfig.SharedConfig {
+	var profiles []awsconfig.SharedConfig
 	configProfiles := cfg.GetValue(config.Profiles).([]string)
 	if configProfiles != nil {
 		for _, profileName := range configProfiles {
@@ -408,13 +648,13 @@ func desiredAccountsToLoad() []string {
 				log.Debug(err)
 			}
 			if profile.SSOAccountID != "" {
-				accountIds = append(accountIds, profile.SSOAccountID)
+				profiles = append(profiles, profile)
 			} else {
 				log.Warn("Ignoring profile with no sso_account_id: " + profileName)
 			}
 		}
 	}
-	return accountIds
+	return profiles
 }
 
 type MessageOnlyFormatter struct{}
@@ -527,7 +767,7 @@ func ssoClientAwsConfig() (*aws.Config, error) {
 }
 
 func ssoStartUrlCandidates() []string {
-	configIni, err := loadAwsConfigIni()
+	configIni, err := ini.Load(awsConfigIniPath())
 	var ssoStartUrlCandidates []string
 	if err == nil {
 		for _, section := range configIni.Sections() {
@@ -543,11 +783,11 @@ func ssoStartUrlCandidates() []string {
 	return ssoStartUrlCandidates
 }
 
-func loadAwsConfigIni() (*ini.File, error) {
+func awsConfigIniPath() string {
 	var iniFilePath = awsconfig.DefaultSharedConfigFilename()
 	envConfig, err := awsconfig.NewEnvConfig()
 	if err == nil && len(envConfig.SharedConfigFile) > 0 {
 		iniFilePath = envConfig.SharedConfigFile
 	}
-	return ini.Load(iniFilePath)
+	return iniFilePath
 }
