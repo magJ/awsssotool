@@ -253,7 +253,7 @@ func mergeAndSaveJsonFile(filename string, object interface{}, perm os.FileMode)
 		return err
 	}
 	fileBytes, err := ioutil.ReadFile(filename)
-	var jsonFileMap map[string]interface{}
+	jsonFileMap := make(map[string]interface{})
 	if err != nil {
 		log.WithField("filename", filename).
 			Debug("Could not find existing json file, will be created")
