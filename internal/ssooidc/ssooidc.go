@@ -193,7 +193,7 @@ func (c *Client) PollingDeviceAuthorisation(
 
 func (c *Client) registerBotoClient() (*BotoClientRegistration, error) {
 	registerClientResponse, err := c.ssoOidcClient.RegisterClient(context.TODO(), &ssooidc.RegisterClientInput{
-		ClientName: aws.String("idklol"), // TODO
+		ClientName: aws.String("magj-awsssotool"),
 		ClientType: aws.String("public"),
 		Scopes:     nil,
 	})

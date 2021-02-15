@@ -19,6 +19,8 @@ import (
 	"hash/adler32"
 	"net/url"
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -366,7 +368,13 @@ func consoleLoginAction(c *cli.Context) error {
 					accountUrlDetail.consoleUrl,
 					*accountUrlDetail.accountInfo.EmailAddress,
 					accountUrlDetail.roleName)
-				err = open.StartWith(accountUrlDetail.consoleUrl, "firefox")
+
+				if runtime.GOOS == "darwin" {
+					// macOs open(1) doesnt otherwise like the extension prefixed url
+					exec.Command("open", "-a", "firefox", "-n", "--args", accountUrlDetail.consoleUrl)
+				} else {
+					err = open.StartWith(accountUrlDetail.consoleUrl, "firefox")
+				}
 			} else {
 				err = open.Start(accountUrlDetail.consoleUrl)
 			}
