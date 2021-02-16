@@ -371,7 +371,7 @@ func consoleLoginAction(c *cli.Context) error {
 
 				if runtime.GOOS == "darwin" {
 					// macOs open(1) doesnt otherwise like the extension prefixed url
-					exec.Command("open", "-a", "firefox", "-n", "--args", accountUrlDetail.consoleUrl)
+					err = exec.Command("open", "-a", "firefox", "-n", "--args", accountUrlDetail.consoleUrl).Start()
 				} else {
 					err = open.StartWith(accountUrlDetail.consoleUrl, "firefox")
 				}
